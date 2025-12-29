@@ -1,18 +1,26 @@
-use std::process::Command;
+use std::process::{Child, Command};
 
-fn run(bin: &str) {
-    let status = Command::new("cargo")
-        .args(["run", "-p", bin])
-        .status()
-        .expect("run fail");
+fn spawn(package: &str, bin_args: &[&str]) -> Child {
+    let mut cmd = Command::new("cargo");
+    cmd.arg("run")
+        .arg("-p")
+        .arg(package)
+        .arg("--"); // tout ce qui suit va au binaire
 
-    if !status.success() {
-        panic!("{} failed", bin);
-    }
+    cmd.args(bin_args)
+        .spawn()
+        .expect("failed to spawn")
 }
 
 fn main() {
-    run("master");
-    run("tester");
-    run("logger");
+    println!("[runner] Starting all processes...");
+
+    let _master = spawn("master", &["--port", "8080"]);
+    let _logger = spawn(
+        "logger",
+        &["--master", "http://127.0.0.1:8080", "--port", "9001"],
+    );
+
+    println!("[runner] All processes started. Ctrl+C to stop.");
+    std::thread::park();
 }

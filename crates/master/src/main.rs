@@ -7,6 +7,13 @@ use core::{LookupResp, RegisterResp};
 use dashmap::DashMap;
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc};
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long)]
+    port: String, // listening port for master ex: 8080
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -38,6 +45,8 @@ async fn lookup(State(st): State<AppState>, Query(q): Query<LookupQ>) -> Json<Lo
 
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
+
     let st = AppState {
         topics: Arc::new(DashMap::new()),
     };
@@ -47,7 +56,7 @@ async fn main() {
         .route("/lookup", get(lookup))
         .with_state(st);
 
-    let addr: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+    let addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse().unwrap();
     println!("master listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
