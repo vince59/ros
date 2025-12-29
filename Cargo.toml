@@ -1,0 +1,5 @@
+# Cargo.toml (racine)
+[workspace]
+members = ["crates/core", "crates/logger", "crates/master", "crates/runner", "crates/tester"]
+
+resolver = "2"
