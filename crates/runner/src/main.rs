@@ -16,8 +16,8 @@ fn main() {
     println!("[runner] Starting all processes...");
 
     let _master = spawn("master", &["--port", "8080"]);
-    let _logger = spawn(
-        "logger",
+    let _tester = spawn(
+        "tester",
         &["--master", "http://127.0.0.1:8080", "--port", "9001"],
     );
 
