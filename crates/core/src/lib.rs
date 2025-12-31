@@ -36,12 +36,30 @@ pub type AsyncCallback =
     Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
 
 #[derive(Clone)]
-pub struct TopicOpen {
+pub struct TopicParam {
     pub master: String,      // ex http://127.0.0.1:8080
     pub name: TopicName,       // ex "chat"
     pub listen_addr: String, // ex "0.0.0.0:9001"
     pub mode: TopicMode,
     pub on_incoming: Option<AsyncCallback>, // message reçu d'un client (Publish)
+}
+
+impl TopicParam {
+    pub fn new(
+        master: String,
+        name: TopicName,
+        port: String,
+        mode: TopicMode,
+        on_incoming: Option<AsyncCallback>,
+    ) -> Self {
+        Self {
+            master,
+            name,
+            listen_addr : format!("0.0.0.0:{}", port),
+            mode,
+            on_incoming,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -115,7 +133,7 @@ pub enum TopicError {
 
 impl Topic {
     /// Ouvre un topic côté owner: démarre le serveur TCP et register sur le master.
-    pub async fn open(cfg: TopicOpen) -> anyhow::Result<Self> {
+    pub async fn open(cfg: TopicParam) -> anyhow::Result<Self> {
         let http = reqwest::Client::new();
         let (tx, _rx) = broadcast::channel::<Vec<u8>>(1024);
 

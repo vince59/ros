@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use core::{AsyncCallback, Topic, TopicMode, TopicOpen, TopicSubscribe, TopicName};
+use core::{AsyncCallback, Topic, TopicMode, TopicParam, TopicSubscribe, TopicName};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // 1) Ouvre le topic (démarre le serveur TCP + register auprès du master)
-    let owner = Topic::open(TopicOpen {
+    let owner = Topic::open(TopicParam {
         master: master.clone(),
         name: TopicName::Test,
         listen_addr,
