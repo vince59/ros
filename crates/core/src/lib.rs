@@ -8,6 +8,22 @@ use tokio::{
     sync::{broadcast, mpsc, Mutex},
 };
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+use std::fmt;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Copy)]
+pub enum TopicName {
+    Logs,
+    Test,
+}
+
+impl fmt::Display for TopicName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TopicName::Logs => write!(f, "Logs"),
+            TopicName::Test => write!(f, "Test"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TopicMode {
@@ -22,7 +38,7 @@ pub type AsyncCallback =
 #[derive(Clone)]
 pub struct TopicOpen {
     pub master: String,      // ex http://127.0.0.1:8080
-    pub topic: String,       // ex "chat"
+    pub name: TopicName,       // ex "chat"
     pub listen_addr: String, // ex "0.0.0.0:9001"
     pub mode: TopicMode,
     pub on_incoming: Option<AsyncCallback>, // message reçu d'un client (Publish)
@@ -31,13 +47,13 @@ pub struct TopicOpen {
 #[derive(Clone)]
 pub struct TopicSubscribe {
     pub master: String,
-    pub topic: String,
+    pub name: TopicName,
     pub on_message: Option<AsyncCallback>, // message reçu du broadcast
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LookupResp {
-    pub topic: String,
+    pub name: TopicName,
     pub addr: Option<String>,
 }
 
@@ -49,7 +65,7 @@ pub struct RegisterResp {
 // Protocole wire (1 connexion = 1 topic)
 #[derive(Debug, Serialize, Deserialize)]
 enum WireMsg {
-    Subscribe { topic: String },
+    Subscribe { topic: TopicName },
     Publish { payload: Vec<u8> },
     // Optionnel: tu peux ajouter Ack / Error si tu veux
 }
@@ -70,7 +86,7 @@ pub struct Topic {
 struct Inner {
     kind: Kind,
     mode: TopicMode,
-    topic: String,
+    name: TopicName,
     http: reqwest::Client,
 
     // broadcast (sert pour owner -> clients, et aussi pour subscriber -> callbacks)
@@ -107,7 +123,7 @@ impl Topic {
         let reg_url = format!(
             "{}/register?topic={}&addr={}",
             cfg.master,
-            urlencoding::encode(&cfg.topic),
+            urlencoding::encode(&cfg.name.to_string()),
             urlencoding::encode(&cfg.listen_addr)
         );
         http.get(reg_url).send().await?.error_for_status()?;
@@ -118,7 +134,7 @@ impl Topic {
                 master: cfg.master.clone(),
             },
             mode: cfg.mode,
-            topic: cfg.topic.clone(),
+            name: cfg.name,
             http,
             tx,
             writer: Mutex::new(None),
@@ -148,7 +164,7 @@ impl Topic {
             // On applique une politique simple: subscriber peut tenter publish (serveur décidera),
             // et recevra broadcast si le serveur en envoie.
             mode: TopicMode::ReadWrite,
-            topic: cfg.topic.clone(),
+            name: cfg.name,
             http,
             tx,
             writer: Mutex::new(None),
@@ -197,7 +213,7 @@ async fn run_owner_server(inner: Arc<Inner>) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("bind {listen_addr}"))?;
 
-    println!("[topic-owner] listening on {listen_addr} for topic '{}'", inner.topic);
+    println!("[topic-owner] listening on {listen_addr} for topic '{}'", inner.name);
 
     loop {
         let (stream, addr) = listener.accept().await?;
@@ -224,8 +240,8 @@ async fn handle_owner_peer(inner: Arc<Inner>, stream: TcpStream) -> anyhow::Resu
         _ => anyhow::bail!("first msg must be Subscribe"),
     };
 
-    if requested != inner.topic {
-        anyhow::bail!("unknown topic '{requested}' (this server serves '{}')", inner.topic);
+    if requested != inner.name {
+        anyhow::bail!("unknown topic '{requested}' (this server serves '{}')", inner.name);
     }
 
     // Si les clients peuvent lire -> on s'abonne au broadcast
@@ -299,7 +315,7 @@ async fn connect_subscriber(inner: Arc<Inner>) -> anyhow::Result<()> {
     };
 
     // lookup
-    let url = format!("{}/lookup?topic={}", master, urlencoding::encode(&inner.topic));
+    let url = format!("{}/lookup?topic={}", master, urlencoding::encode(&inner.name.to_string()));
     let resp = inner.http.get(url).send().await?.error_for_status()?;
     let info: LookupResp = resp.json().await?;
 
@@ -312,7 +328,7 @@ async fn connect_subscriber(inner: Arc<Inner>) -> anyhow::Result<()> {
     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
 
     // send Subscribe
-    framed.send(Bytes::from(encode(&WireMsg::Subscribe { topic: inner.topic.clone() }))).await?;
+    framed.send(Bytes::from(encode(&WireMsg::Subscribe { topic: inner.name }))).await?;
 
     // Writer task via mpsc
     let (txw, mut rxw) = mpsc::channel::<Vec<u8>>(1024);

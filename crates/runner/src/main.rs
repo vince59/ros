@@ -16,11 +16,14 @@ fn main() {
     println!("[runner] Starting all processes...");
 
     let _master = spawn("master", &["--port", "8080"]);
-    let _tester = spawn(
-        "tester",
+    let _logger = spawn(
+        "logger",
         &["--master", "http://127.0.0.1:8080", "--port", "9001"],
     );
-
+    let _tester = spawn(
+        "tester",
+        &["--master", "http://127.0.0.1:8080", "--port", "9002"],
+    );
     println!("[runner] All processes started. Ctrl+C to stop.");
     std::thread::park();
 }

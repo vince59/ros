@@ -3,7 +3,7 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use core::{LookupResp, RegisterResp};
+use core::{LookupResp, RegisterResp, TopicName};
 use dashmap::DashMap;
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc};
@@ -22,25 +22,25 @@ struct AppState {
 
 #[derive(Deserialize)]
 struct RegisterQ {
-    topic: String,
+    topic: TopicName,
     addr: String,
 }
 
 #[derive(Deserialize)]
 struct LookupQ {
-    topic: String,
+    topic: TopicName,
 }
 
 async fn register(State(st): State<AppState>, Query(q): Query<RegisterQ>) -> Json<RegisterResp> {
-    st.topics.insert(q.topic.clone(), q.addr.clone());
-    println!("[master] registered topic {}", q.topic);
+    st.topics.insert(q.topic.to_string(), q.addr.clone());
+    println!("[master] registered topic {}", q.topic.to_string());
     Json(RegisterResp { ok: true })
 }
 
 async fn lookup(State(st): State<AppState>, Query(q): Query<LookupQ>) -> Json<LookupResp> {
-    let addr = st.topics.get(&q.topic).map(|v| v.value().clone());
-    println!("[master] lookup topic {}", q.topic);
-    Json(LookupResp { topic: q.topic, addr })
+    let addr = st.topics.get(&q.topic.to_string()).map(|v| v.value().clone());
+    println!("[master] lookup topic {}", q.topic.to_string());
+    Json(LookupResp { name: q.topic, addr })
 }
 
 #[tokio::main]

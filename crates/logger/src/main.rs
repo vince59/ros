@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::sync::Arc;
-use core::{AsyncCallback, Topic, TopicMode, TopicOpen};
+use core::{AsyncCallback, Topic, TopicMode, TopicOpen, TopicName};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -31,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
     // Ouvre le topic et démarre le serveur TCP automatiquement
     let topic = Topic::open(TopicOpen {
         master,
-        topic: topic_name,
+        name: TopicName::Logs,
         listen_addr,
         mode: TopicMode::ReadWrite, // ReadOnly / WriteOnly / ReadWrite
         on_incoming: Some(on_incoming),

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use core::{AsyncCallback, Topic, TopicMode, TopicOpen, TopicSubscribe};
+use core::{AsyncCallback, Topic, TopicMode, TopicOpen, TopicSubscribe, TopicName};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -7,7 +7,6 @@ async fn main() -> anyhow::Result<()> {
     let master = "http://127.0.0.1:8080".to_string();
 
     // Exemple fixe
-    let topic = "demo".to_string();
     let listen_addr = "127.0.0.1:9001".to_string();
 
     // Callback côté owner: s'active quand un client publie vers le topic
@@ -23,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     // 1) Ouvre le topic (démarre le serveur TCP + register auprès du master)
     let owner = Topic::open(TopicOpen {
         master: master.clone(),
-        topic: topic.clone(),
+        name: TopicName::Test,
         listen_addr,
         mode: TopicMode::ReadWrite,
         on_incoming: Some(on_incoming),
@@ -43,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     // 2) Souscrit au même topic (lookup master + connect TCP)
     let sub = Topic::subscribe(TopicSubscribe {
         master,
-        topic,
+        name: TopicName::Test,
         on_message: Some(on_message),
     })
     .await?;
