@@ -1,6 +1,6 @@
 use clap::Parser;
+use core::{AsyncCallback, Message, Topic, TopicMode, TopicName, TopicParam};
 use std::sync::Arc;
-use core::{AsyncCallback, Topic, TopicMode, TopicParam, TopicName};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -9,9 +9,7 @@ struct Args {
 
     #[arg(long)]
     port: String, // listening port ex: 9001
-
 }
-
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,16 +19,19 @@ async fn main() -> anyhow::Result<()> {
     // Callback appelée quand un client envoie un message (Publish) au topic
     let on_incoming: AsyncCallback = Arc::new(|payload: Vec<u8>| {
         Box::pin(async move {
-            println!("[owner] incoming {} bytes: {:?}", payload.len(), payload);
+            match bincode::deserialize::<Message>(&payload) {
+                Ok(app) => println!("[owner] got {:?}", app),
+                Err(e) => eprintln!("[owner] invalid Message payload: {e}"),
+            }
         })
     });
 
     // Ouvre le topic et démarre le serveur TCP automatiquement
-    let cfg= TopicParam::new(
+    let cfg = TopicParam::new(
         args.master,
-        TopicName::Logs,
+        TopicName::Logger,
         args.port,
-        TopicMode::WriteOnly, 
+        TopicMode::WriteOnly,
         Some(on_incoming),
     );
 

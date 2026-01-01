@@ -1,7 +1,37 @@
-use std::sync::Arc;
-use core::{AsyncCallback, Topic, TopicMode, TopicParam, TopicSubscribe, TopicName};
+use core::{Message, Topic, TopicName, TopicSubscribe, LogLevel, LogMode, encode_msg};
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long)]
+    master: String, // master ip and port ex: http://127.0.0.1:8080
+
+    #[arg(long)]
+    port: String, // listening port ex: 9001
+}
 
 #[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    println!("[tester] V1");
+    let args = Args::parse();
+
+    let sub = Topic::subscribe_with_retry(TopicSubscribe {
+        master: args.master,
+        name: TopicName::Logger,
+        on_message: None,
+    }, std::time::Duration::from_millis(250), std::time::Duration::from_secs(5)).await?;
+
+    // 3) Publie périodiquement (tu recevras ces messages via la souscription)
+    let mut n: u64 = 0;
+    loop {
+        n += 1;
+        print!("[tester] publishing ping #{n}\n");
+        let msg = Message::Log { level: LogLevel::Info, content: format!("ping #{n}"), mode: LogMode::Console };
+        let _ = sub.publish(encode_msg(&msg)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+}
+/* Ancienne version pour référence
 async fn main() -> anyhow::Result<()> {
     // Master déjà lancé ailleurs
     let master = "http://127.0.0.1:8080".to_string();
@@ -61,3 +91,4 @@ async fn main() -> anyhow::Result<()> {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }
+*/
