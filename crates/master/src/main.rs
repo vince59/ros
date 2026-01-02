@@ -61,11 +61,6 @@ async fn register(
     }
 }
 
-async fn ping(State(st): State<AppState>, Query(q): Query<RegisterQ>) -> Json<RegisterResp> {
-    println!("[master] ping topic {}", q.topic.to_string());
-    Json(RegisterResp { ok: true })
-}
-
 async fn lookup(
     State(st): State<AppState>,
     uri: Uri,
@@ -114,7 +109,6 @@ async fn main() {
     let app = Router::new()
         .route("/register", get(register))
         .route("/lookup", get(lookup))
-        .route("/ping", get(ping))
         .with_state(st);
 
     let addr: SocketAddr = format!("0.0.0.0:{}", args.port).parse().unwrap();

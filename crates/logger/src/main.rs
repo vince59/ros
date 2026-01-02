@@ -13,15 +13,21 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("[logger] V1");
+    println!("[Logger] V1");
     let args = Args::parse();
 
     // Callback appelée quand un client envoie un message (Publish) au topic
-    let on_incoming: AsyncCallback = Arc::new(|payload: Vec<u8>| {
+    let on_incoming: AsyncCallback = Arc::new(|msg: Message| {
         Box::pin(async move {
-            match bincode::deserialize::<Message>(&payload) {
-                Ok(app) => println!("[owner] got {:?}", app),
-                Err(e) => eprintln!("[owner] invalid Message payload: {e}"),
+            match msg {
+                Message::Log {
+                    who,
+                    level,
+                    content,
+                    mode,
+                } => {
+                    println!("[Logger] who={who} level={level:?} mode={mode:?} content={content}");
+                }
             }
         })
     });
@@ -36,7 +42,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let _logger = Topic::open(cfg).await?;
-    println!("[logger] running. Press Ctrl+C to stop.");
+    println!("[Logger] running. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;
     Ok(())
 }

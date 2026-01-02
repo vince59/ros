@@ -46,6 +46,7 @@ pub enum LogMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     Log {
+        who: String,
         level: LogLevel,
         content: String,
         mode: LogMode,
@@ -60,7 +61,7 @@ pub enum TopicMode {
 }
 
 pub type AsyncCallback =
-    Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
+    Arc<dyn Fn(Message) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static>;
 
 #[derive(Clone)]
 pub struct TopicParam {
@@ -113,8 +114,7 @@ pub struct RegisterResp {
 #[derive(Debug, Serialize, Deserialize)]
 enum WireMsg {
     Subscribe { topic: TopicName },
-    Publish { payload: Vec<u8> },
-    // Optionnel: tu peux ajouter Ack / Error si tu veux
+    Publish { msg: Message },
 }
 
 fn encode(msg: &WireMsg) -> Vec<u8> {
@@ -123,14 +123,6 @@ fn encode(msg: &WireMsg) -> Vec<u8> {
 }
 fn decode(bytes: &[u8]) -> WireMsg {
     bincode::deserialize(bytes).expect("bincode deserialize")
-}
-
-pub fn encode_msg(msg: &Message) -> Vec<u8> {
-    bincode::serialize(msg).expect("bincode serialize Message")
-}
-
-pub fn decode_msg(bytes: &[u8]) -> Message {
-    bincode::deserialize(bytes).expect("bincode deserialize Message")
 }
 
 #[derive(Clone)]
@@ -145,10 +137,10 @@ struct Inner {
     http: reqwest::Client,
 
     // broadcast (sert pour owner -> clients, et aussi pour subscriber -> callbacks)
-    tx: broadcast::Sender<Vec<u8>>,
+    tx: broadcast::Sender<Message>,
 
     // pour publish réseau (subscriber ou client-connection), on passe par un mpsc -> writer task
-    writer: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    writer: Mutex<Option<mpsc::Sender<Message>>>,
 
     // callbacks
     on_incoming_owner: Option<AsyncCallback>, // client->owner
@@ -156,7 +148,9 @@ struct Inner {
 }
 
 enum Kind {
-    Owner { listen_addr: String, master: String },
+    Owner { listen_addr: String, 
+        #[allow(dead_code)]
+        master: String },
     Subscriber { master: String },
 }
 
@@ -172,7 +166,7 @@ impl Topic {
     /// Ouvre un topic côté owner: démarre le serveur TCP et register sur le master.
     pub async fn open(cfg: TopicParam) -> anyhow::Result<Self> {
         let http = reqwest::Client::new();
-        let (tx, _rx) = broadcast::channel::<Vec<u8>>(1024);
+        let (tx, _rx) = broadcast::channel::<Message>(1024);
 
         // register master (GET)
         let reg_url = format!(
@@ -220,7 +214,7 @@ impl Topic {
     /// Souscrit à un topic: lookup master -> connect -> démarre reader/writer tasks.
     pub async fn subscribe(cfg: TopicSubscribe) -> anyhow::Result<Self> {
         let http = reqwest::Client::new();
-        let (tx, _rx) = broadcast::channel::<Vec<u8>>(1024);
+        let (tx, _rx) = broadcast::channel::<Message>(1024);
 
         let inner = Arc::new(Inner {
             kind: Kind::Subscriber {
@@ -245,7 +239,7 @@ impl Topic {
         max: Duration,
     ) -> anyhow::Result<Self> {
         let http = reqwest::Client::new();
-        let (tx, _rx) = tokio::sync::broadcast::channel::<Vec<u8>>(1024);
+        let (tx, _rx) = tokio::sync::broadcast::channel::<Message>(1024);
 
         let inner = Arc::new(Inner {
             kind: Kind::Subscriber {
@@ -266,7 +260,6 @@ impl Topic {
             println!("[topic-sub] trying to connect to topic '{}'...", inner.name);
             match connect_subscriber(inner.clone()).await {
                 Ok(()) => {
-                    println!("test");
                     return Ok(Self { inner });
                 }
                 Err(e) => {
@@ -288,7 +281,7 @@ impl Topic {
 
     /// Publie un message (owner ou subscriber). Les permissions sont appliquées côté local
     /// (et le serveur fera foi dans tous les cas).
-    pub async fn publish(&self, payload: Vec<u8>) -> Result<(), TopicError> {
+    pub async fn publish(&self, payload: Message) -> Result<(), TopicError> {
         // Owner publish local -> broadcast vers clients (si mode le permet)
         if matches!(self.inner.kind, Kind::Owner { .. }) {
             if !matches!(self.inner.mode, TopicMode::ReadOnly | TopicMode::ReadWrite) {
@@ -330,9 +323,7 @@ async fn run_owner_server(inner: Arc<Inner>) -> anyhow::Result<()> {
     loop {
         let (stream, addr) = listener.accept().await?;
         let inner2 = inner.clone();
-        println!("test2");
         tokio::spawn(async move {
-            println!("test3");
             if let Err(e) = handle_owner_peer(inner2, stream).await {
                 eprintln!("[topic-owner] peer {addr} error: {e:#}");
             }
@@ -366,10 +357,10 @@ async fn handle_owner_peer(inner: Arc<Inner>, stream: TcpStream) -> anyhow::Resu
         while let Some(item) = framed.next().await {
             let bytes = item?;
             match decode(&bytes) {
-                WireMsg::Publish { payload } => {
+                WireMsg::Publish { msg } => {
                     // callback owner
                     if let Some(cb) = &inner.on_incoming_owner {
-                        (cb)(payload).await;
+                        (cb)(msg).await;
                     }
                 }
                 WireMsg::Subscribe { .. } => {}
@@ -387,13 +378,13 @@ async fn handle_owner_peer(inner: Arc<Inner>, stream: TcpStream) -> anyhow::Resu
             maybe = framed.next() => {
                 match maybe {
                     Some(Ok(bytes)) => {
-                        if let WireMsg::Publish { payload } = decode(&bytes) {
+                        if let WireMsg::Publish { msg } = decode(&bytes) {
                             // ReadWrite: callback + broadcast
                             if let Some(cb) = &inner.on_incoming_owner {
-                                (cb)(payload.clone()).await;
+                                (cb)(msg.clone()).await;
                             }
                             if inner.mode == TopicMode::ReadWrite {
-                                let _ = inner.tx.send(payload);
+                                let _ = inner.tx.send(msg.clone());
                             }
                         }
                     }
@@ -404,8 +395,8 @@ async fn handle_owner_peer(inner: Arc<Inner>, stream: TcpStream) -> anyhow::Resu
 
             msg = rx.recv() => {
                 match msg {
-                    Ok(payload) => {
-                        let out = encode(&WireMsg::Publish { payload });
+                    Ok(msg) => {
+                        let out = encode(&WireMsg::Publish { msg });
                         framed.send(Bytes::from(out)).await?;
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -452,7 +443,7 @@ async fn connect_subscriber(inner: Arc<Inner>) -> anyhow::Result<()> {
         .await?;
 
     // Writer task via mpsc
-    let (txw, mut rxw) = mpsc::channel::<Vec<u8>>(1024);
+    let (txw, mut rxw) = mpsc::channel::<Message>(1024);
     *inner.writer.lock().await = Some(txw);
 
     // Split: on garde framed entier mais on fait 2 tasks avec Mutex serait lourd.
@@ -467,13 +458,13 @@ async fn connect_subscriber(inner: Arc<Inner>) -> anyhow::Result<()> {
                 maybe = framed.next() => {
                     match maybe {
                         Some(Ok(bytes)) => {
-                            if let WireMsg::Publish { payload } = decode(&bytes) {
+                            if let WireMsg::Publish { msg } = decode(&bytes) {
                                 // broadcast local
-                                let _ = inner2.tx.send(payload.clone());
+                                let _ = inner2.tx.send(msg.clone());
 
                                 // callback subscriber
                                 if let Some(cb) = &inner2.on_message_sub {
-                                    (cb)(payload).await;
+                                    (cb)(msg.clone()).await;
                                 }
                             }
                         }
@@ -488,8 +479,8 @@ async fn connect_subscriber(inner: Arc<Inner>) -> anyhow::Result<()> {
                 // écriture subscriber->serveur
                 some = rxw.recv() => {
                     match some {
-                        Some(payload) => {
-                            let out = encode(&WireMsg::Publish { payload });
+                        Some(msg) => {
+                            let out = encode(&WireMsg::Publish { msg });
                             if framed.send(Bytes::from(out)).await.is_err() {
                                 break;
                             }
